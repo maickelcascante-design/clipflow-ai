@@ -1,584 +1,67 @@
-const OPENAI_API = "https://api.openai.com/v1";
-
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     // =========================================================
-    // CORS
+    // Helpers
     // =========================================================
 
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    };
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders,
-      });
-    }
-
-    // =========================================================
-    // HELPERS
-    // =========================================================
-
-    function json(data, status = 200) {
+    const json = (data, status = 200) => {
       return new Response(JSON.stringify(data), {
         status,
         headers: {
           "Content-Type": "application/json; charset=utf-8",
-          ...corsHeaders,
-        },
+          "Cache-Control": "no-store"
+        }
       });
-    }
+    };
 
-    async function safeJson(response) {
+    const getErrorText = async (response) => {
       const text = await response.text();
 
       if (!text) {
-        return {
-          data: {},
-          raw: "",
-        };
+        return `OpenAI respondió sin contenido (HTTP ${response.status}).`;
       }
 
       try {
-        return {
-          data: JSON.parse(text),
-          raw: text,
-        };
+        const parsed = JSON.parse(text);
+
+        return (
+          parsed?.error?.message ||
+          parsed?.message ||
+          parsed?.error ||
+          text
+        );
       } catch {
-        return {
-          data: {},
-          raw: text,
-        };
+        return text;
       }
-    }
+    };
 
-    function openAIError(response, data, raw) {
-      return json(
-        {
-          error:
-            data?.error?.message ||
-            data?.error ||
-            raw ||
-            `OpenAI respondió con HTTP ${response.status}`,
-          openai_status: response.status,
-          openai_response: data || raw || null,
-        },
-        response.status
-      );
-    }
-
-    async function getBody(request) {
-      try {
-        return await request.json();
-      } catch {
-        return {};
-      }
-    }
-
-    function getDuration(value) {
-      const n = Number(value);
-
-      // La API de Sora 2 acepta 4, 8 o 12 segundos.
-      if (n <= 4) return "4";
-      if (n <= 8) return "8";
-      return "12";
-    }
+    const openAIHeaders = {
+      "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    };
 
     // =========================================================
-    // HEALTH CHECK
+    // HEALTH
     // =========================================================
 
-    if (url.pathname === "/api/health" && request.method === "GET") {
+    if (url.pathname === "/api/health") {
       return json({
         ok: true,
-        platform: "cloudflare-workers",
-        service: "clipflow-ai",
-        openai_configured: Boolean(env.OPENAI_API_KEY),
-        time: new Date().toISOString(),
-      });
-    }
-
-    // =========================================================
-    // CREATE VIDEO JOB
-    // POST /api/jobs
-    // =========================================================
-
-    if (url.pathname === "/api/jobs" && request.method === "POST") {
-      if (!env.OPENAI_API_KEY) {
-        return json(
-          {
-            error: "Falta configurar OPENAI_API_KEY en Cloudflare.",
-          },
-          500
-        );
-      }
-
-      const body = await getBody(request);
-
-      const topic =
-        body.topic ||
-        body.prompt ||
-        body.description ||
-        "Crea un video corto atractivo";
-
-      const visualStyle =
-        body.visualStyle ||
-        body.style ||
-        "Dinámico";
-
-      const format =
-        body.format ||
-        "9:16";
-
-      const requestedDuration = Number(body.duration || 30);
-
-      const seconds = getDuration(requestedDuration);
-
-      // ---------------------------------------------------------
-      // Prompt final para Sora
-      // ---------------------------------------------------------
-
-      const prompt = `
-Crea un video vertical para redes sociales.
-
-Tema:
-${topic}
-
-Estilo visual:
-${visualStyle}
-
-Formato:
-${format}
-
-Características:
-- Video vertical 9:16.
-- Ritmo dinámico.
-- Imágenes visualmente atractivas.
-- Gancho fuerte desde el principio.
-- Escenas con movimiento.
-- Estética moderna y profesional.
-- Pensado para YouTube Shorts, TikTok e Instagram Reels.
-- No agregues texto ilegible.
-- Mantén una composición clara y atractiva.
-
-Duración solicitada por el usuario:
-${requestedDuration} segundos.
-
-Duración disponible en el modelo:
-${seconds} segundos.
-`.trim();
-
-      // ---------------------------------------------------------
-      // IMPORTANTE:
-      // Videos API utiliza multipart/form-data.
-      // ---------------------------------------------------------
-
-      const form = new FormData();
-
-      form.append("model", "sora-2");
-      form.append("prompt", prompt);
-      form.append("seconds", seconds);
-      form.append("size", "720x1280");
-
-      let response;
-
-      try {
-        response = await fetch(`${OPENAI_API}/videos`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-          },
-          body: form,
-        });
-      } catch (error) {
-        return json(
-          {
-            error: "No se pudo conectar con OpenAI.",
-            details: String(error?.message || error),
-          },
-          502
-        );
-      }
-
-      const { data, raw } = await safeJson(response);
-
-      if (!response.ok) {
-        return openAIError(response, data, raw);
-      }
-
-      // ---------------------------------------------------------
-      // Respuesta al frontend
-      // ---------------------------------------------------------
-
-      return json({
-        ok: true,
-
-        id: data.id || null,
-
-        object: data.object || "video",
-
-        status: data.status || "queued",
-
-        progress: data.progress ?? 0,
-
-        model: data.model || "sora-2",
-
-        requested_duration: requestedDuration,
-
-        actual_duration: Number(seconds),
-
-        size: data.size || "720x1280",
-
-        prompt,
-
-        created_at: data.created_at || null,
-
-        completed_at: data.completed_at || null,
-
-        error: data.error || null,
-
-        // URL que tu frontend puede utilizar para consultar el trabajo.
-        job_url: data.id
-          ? `${url.origin}/api/jobs/${data.id}`
-          : null,
-
-        // Cuando esté terminado, este endpoint servirá el MP4.
-        content_url: data.id
-          ? `${url.origin}/api/jobs/${data.id}/content`
-          : null,
-
-        openai: data,
-      });
-    }
-
-    // =========================================================
-    // GET VIDEO JOB STATUS
-    //
-    // GET /api/jobs/:id
-    // =========================================================
-
-    if (
-      url.pathname.startsWith("/api/jobs/") &&
-      request.method === "GET"
-    ) {
-      if (!env.OPENAI_API_KEY) {
-        return json(
-          {
-            error: "Falta configurar OPENAI_API_KEY en Cloudflare.",
-          },
-          500
-        );
-      }
-
-      const parts = url.pathname.split("/").filter(Boolean);
-
-      // /api/jobs/:id
-      const id = parts[2];
-
-      if (!id) {
-        return json(
-          {
-            error: "ID de video inválido.",
-          },
-          400
-        );
-      }
-
-      // Si pidieron /content, lo manejamos abajo.
-      if (parts[3] === "content") {
-        return await proxyVideoContent(id, env, corsHeaders);
-      }
-
-      let response;
-
-      try {
-        response = await fetch(`${OPENAI_API}/videos/${id}`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-          },
-        });
-      } catch (error) {
-        return json(
-          {
-            error: "No se pudo consultar el video en OpenAI.",
-            details: String(error?.message || error),
-          },
-          502
-        );
-      }
-
-      const { data, raw } = await safeJson(response);
-
-      if (!response.ok) {
-        return openAIError(response, data, raw);
-      }
-
-      const status = data.status || "unknown";
-
-      return json({
-        ok: true,
-
-        id: data.id || id,
-
-        object: data.object || "video",
-
-        status,
-
-        progress: data.progress ?? 0,
-
-        model: data.model || "sora-2",
-
-        size: data.size || "720x1280",
-
-        seconds: data.seconds || null,
-
-        created_at: data.created_at || null,
-
-        completed_at: data.completed_at || null,
-
-        expires_at: data.expires_at || null,
-
-        error: data.error || null,
-
-        // El frontend puede usar esta URL cuando status === completed.
-        content_url:
-          status === "completed"
-            ? `${url.origin}/api/jobs/${id}/content`
-            : null,
-
-        openai: data,
-      });
-    }
-
-    // =========================================================
-    // DOWNLOAD / STREAM VIDEO
-    //
-    // GET /api/jobs/:id/content
-    // =========================================================
-
-    async function proxyVideoContent(id, env, cors) {
-      if (!env.OPENAI_API_KEY) {
-        return json(
-          {
-            error: "Falta configurar OPENAI_API_KEY en Cloudflare.",
-          },
-          500
-        );
-      }
-
-      let response;
-
-      try {
-        response = await fetch(
-          `${OPENAI_API}/videos/${id}/content`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-            },
-          }
-        );
-      } catch (error) {
-        return json(
-          {
-            error: "No se pudo descargar el video.",
-            details: String(error?.message || error),
-          },
-          502
-        );
-      }
-
-      if (!response.ok) {
-        const { data, raw } = await safeJson(response);
-
-        return openAIError(response, data, raw);
-      }
-
-      const headers = new Headers();
-
-      const contentType =
-        response.headers.get("Content-Type") ||
-        "video/mp4";
-
-      headers.set("Content-Type", contentType);
-
-      const contentLength =
-        response.headers.get("Content-Length");
-
-      if (contentLength) {
-        headers.set("Content-Length", contentLength);
-      }
-
-      headers.set(
-        "Content-Disposition",
-        `inline; filename="clipflow-${id}.mp4"`
-      );
-
-      headers.set(
-        "Cache-Control",
-        "private, max-age=300"
-      );
-
-      for (const [key, value] of Object.entries(cors)) {
-        headers.set(key, value);
-      }
-
-      return new Response(response.body, {
-        status: response.status,
-        headers,
-      });
-    }
-
-    // =========================================================
-    // OPENAI SOCIAL COPY
-    //
-    // POST /api/social/copy
-    // =========================================================
-
-    if (
-      url.pathname === "/api/social/copy" &&
-      request.method === "POST"
-    ) {
-      if (!env.OPENAI_API_KEY) {
-        return json(
-          {
-            error: "Falta configurar OPENAI_API_KEY en Cloudflare.",
-          },
-          500
-        );
-      }
-
-      const body = await getBody(request);
-
-      const platform = body.platform || "TikTok";
-      const topic = body.topic || "";
-      const tone = body.tone || "viral";
-
-      const prompt = `
-Crea contenido para redes sociales.
-
-Plataforma:
-${platform}
-
-Tema:
-${topic}
-
-Tono:
-${tone}
-
-Devuelve SOLO JSON válido con esta estructura:
-
-{
-  "caption": "texto de la publicación",
-  "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5"]
-}
-
-No uses Markdown.
-No agregues explicaciones.
-`.trim();
-
-      let response;
-
-      try {
-        response = await fetch(`${OPENAI_API}/responses`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: env.TEXT_MODEL || "gpt-5.6",
-            input: prompt,
-          }),
-        });
-      } catch (error) {
-        return json(
-          {
-            error: "No se pudo conectar con OpenAI.",
-            details: String(error?.message || error),
-          },
-          502
-        );
-      }
-
-      const { data, raw } = await safeJson(response);
-
-      if (!response.ok) {
-        return openAIError(response, data, raw);
-      }
-
-      // Responses API normalmente devuelve output.
-      let text = "";
-
-      if (typeof data.output_text === "string") {
-        text = data.output_text;
-      }
-
-      if (!text && Array.isArray(data.output)) {
-        for (const item of data.output) {
-          if (!Array.isArray(item.content)) continue;
-
-          for (const content of item.content) {
-            if (typeof content.text === "string") {
-              text += content.text;
-            }
-          }
-        }
-      }
-
-      text = text
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
-
-      let result;
-
-      try {
-        result = JSON.parse(text);
-      } catch {
-        return json(
-          {
-            error: "OpenAI devolvió contenido que no es JSON válido.",
-            raw: text,
-          },
-          502
-        );
-      }
-
-      return json({
-        ok: true,
-        caption: result.caption || "",
-        hashtags: Array.isArray(result.hashtags)
-          ? result.hashtags
-          : [],
+        platform: "cloudflare-workers"
       });
     }
 
     // =========================================================
     // TIKTOK OAUTH - START
-    //
-    // GET /auth/tiktok/start
     // =========================================================
 
-    if (
-      url.pathname === "/auth/tiktok/start" &&
-      request.method === "GET"
-    ) {
+    if (url.pathname === "/auth/tiktok/start") {
       if (!env.TIKTOK_CLIENT_KEY) {
         return new Response(
-          "Falta TIKTOK_CLIENT_KEY",
-          {
-            status: 500,
-            headers: corsHeaders,
-          }
+          "Falta configurar TIKTOK_CLIENT_KEY en Cloudflare.",
+          { status: 500 }
         );
       }
 
@@ -592,7 +75,7 @@ No agregues explicaciones.
         response_type: "code",
         scope: "user.info.basic,video.publish",
         redirect_uri: redirectUri,
-        state,
+        state
       });
 
       return new Response(null, {
@@ -602,61 +85,43 @@ No agregues explicaciones.
             `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`,
 
           "Set-Cookie":
-            `cf_oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
-
-          ...corsHeaders,
-        },
+            `cf_oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`
+        }
       });
     }
 
     // =========================================================
     // TIKTOK OAUTH - CALLBACK
-    //
-    // GET /auth/tiktok/callback
     // =========================================================
 
-    if (
-      url.pathname === "/auth/tiktok/callback" &&
-      request.method === "GET"
-    ) {
-      if (
-        !env.TIKTOK_CLIENT_KEY ||
-        !env.TIKTOK_CLIENT_SECRET
-      ) {
+    if (url.pathname === "/auth/tiktok/callback") {
+      if (!env.TIKTOK_CLIENT_KEY || !env.TIKTOK_CLIENT_SECRET) {
         return new Response(
-          "Faltan las variables de TikTok.",
-          {
-            status: 500,
-            headers: corsHeaders,
-          }
+          "Faltan TIKTOK_CLIENT_KEY o TIKTOK_CLIENT_SECRET.",
+          { status: 500 }
         );
       }
 
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
 
-      const cookie =
+      const cookies =
         request.headers.get("Cookie") || "";
 
-      const match = cookie.match(
-        /(?:^|;\s*)cf_oauth_state=([^;]+)/
-      );
-
-      const expectedState =
-        match?.[1] || "";
+      const expected =
+        cookies.match(
+          /(?:^|;\s*)cf_oauth_state=([^;]+)/
+        )?.[1];
 
       if (
         !code ||
         !state ||
-        !expectedState ||
-        state !== expectedState
+        !expected ||
+        state !== expected
       ) {
         return new Response(
           "OAuth state inválido o expirado.",
-          {
-            status: 400,
-            headers: corsHeaders,
-          }
+          { status: 400 }
         );
       }
 
@@ -666,121 +131,586 @@ No agregues explicaciones.
         code,
         grant_type: "authorization_code",
         redirect_uri:
-          `${url.origin}/auth/tiktok/callback`,
+          `${url.origin}/auth/tiktok/callback`
       });
 
-      let response;
+      const response = await fetch(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded"
+          },
+          body
+        }
+      );
+
+      const responseText = await response.text();
+
+      let token;
 
       try {
-        response = await fetch(
-          "https://open.tiktokapis.com/v2/oauth/token/",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/x-www-form-urlencoded",
-            },
-            body,
-          }
-        );
-      } catch (error) {
+        token = responseText
+          ? JSON.parse(responseText)
+          : null;
+      } catch {
         return new Response(
-          `Error conectando con TikTok: ${String(
-            error?.message || error
-          )}`,
-          {
-            status: 502,
-            headers: corsHeaders,
-          }
+          `TikTok devolvió una respuesta no válida: ${responseText || "vacía"}`,
+          { status: 502 }
         );
       }
 
-      const { data, raw } =
-        await safeJson(response);
-
-      if (!response.ok) {
-        return openAIError(response, data, raw);
-      }
-
-      if (data.error) {
+      if (!response.ok || token?.error) {
         return json(
           {
-            error: data.error,
-            error_description:
-              data.error_description || null,
+            ok: false,
+            provider: "tiktok",
+            error:
+              token?.error_description ||
+              token?.error ||
+              "Error de autorización de TikTok."
           },
           400
         );
       }
 
-      // ---------------------------------------------------------
-      // IMPORTANTE:
-      // No guardamos tokens permanentemente aquí.
-      // Para producción debes usar KV/D1/DO u otro almacenamiento.
-      // ---------------------------------------------------------
-
       return new Response(
         `<!doctype html>
-<html lang="es">
+<html>
 <head>
 <meta charset="utf-8">
 <title>TikTok conectado</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
-<body style="font-family:system-ui;background:#08090d;color:white;padding:40px">
+
+<body style="font-family:system-ui;background:#08090d;color:#fff;padding:40px">
+
 <h1>✓ TikTok conectado</h1>
+
 <p>La autorización se completó correctamente.</p>
-<p>Puedes cerrar esta ventana.</p>
+
+<script>
+setTimeout(() => window.close(), 1200);
+</script>
+
 </body>
 </html>`,
         {
-          status: 200,
           headers: {
             "Content-Type":
-              "text/html; charset=utf-8",
-            ...corsHeaders,
-          },
+              "text/html;charset=utf-8"
+          }
         }
       );
     }
 
     // =========================================================
-    // ROOT
+    // OPENAI - GENERAR COPY SOCIAL
     // =========================================================
 
     if (
-      url.pathname === "/" ||
-      url.pathname === ""
+      url.pathname === "/api/social/copy" &&
+      request.method === "POST"
     ) {
+      if (!env.OPENAI_API_KEY) {
+        return json(
+          {
+            error:
+              "Falta configurar OPENAI_API_KEY en Cloudflare."
+          },
+          500
+        );
+      }
+
+      let body;
+
+      try {
+        body = await request.json();
+      } catch {
+        return json(
+          {
+            error: "El cuerpo enviado no es JSON válido."
+          },
+          400
+        );
+      }
+
+      const platform =
+        body?.platform || "TikTok";
+
+      const topic =
+        body?.topic || "";
+
+      const tone =
+        body?.tone || "viral";
+
+      const prompt = `
+Crea un caption y hashtags para ${platform}.
+
+Tema:
+${topic}
+
+Tono:
+${tone}
+
+Devuelve ÚNICAMENTE JSON válido con esta estructura:
+
+{
+  "caption": "...",
+  "hashtags": ["#...", "#...", "#..."]
+}
+`;
+
+      const response = await fetch(
+        "https://api.openai.com/v1/responses",
+        {
+          method: "POST",
+          headers: openAIHeaders,
+          body: JSON.stringify({
+            model:
+              env.TEXT_MODEL || "gpt-5.6",
+            input: prompt
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const error =
+          await getErrorText(response);
+
+        return json(
+          {
+            ok: false,
+            error
+          },
+          response.status
+        );
+      }
+
+      const data = await response.json();
+
+      let text = "";
+
+      if (data?.output_text) {
+        text = data.output_text;
+      } else {
+        text = (data?.output || [])
+          .flatMap(
+            item => item?.content || []
+          )
+          .filter(
+            item =>
+              item?.type === "output_text"
+          )
+          .map(
+            item => item?.text || ""
+          )
+          .join("");
+      }
+
+      text = text
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+
+      if (!text) {
+        return json(
+          {
+            ok: false,
+            error:
+              "OpenAI no devolvió texto para generar el copy.",
+            raw: data
+          },
+          502
+        );
+      }
+
+      try {
+        return json(JSON.parse(text));
+      } catch {
+        return json(
+          {
+            ok: false,
+            error:
+              "OpenAI devolvió contenido que no es JSON válido.",
+            raw: text
+          },
+          502
+        );
+      }
+    }
+
+    // =========================================================
+    // OPENAI SORA - CREAR VIDEO
+    // POST /api/jobs
+    // =========================================================
+
+    if (
+      url.pathname === "/api/jobs" &&
+      request.method === "POST"
+    ) {
+      if (!env.OPENAI_API_KEY) {
+        return json(
+          {
+            ok: false,
+            error:
+              "Falta configurar OPENAI_API_KEY en Cloudflare."
+          },
+          500
+        );
+      }
+
+      let body;
+
+      try {
+        body = await request.json();
+      } catch {
+        return json(
+          {
+            ok: false,
+            error:
+              "El cuerpo enviado no es JSON válido."
+          },
+          400
+        );
+      }
+
+      const topic =
+        body?.topic ||
+        body?.prompt ||
+        "Crea un video corto atractivo.";
+
+      const style =
+        body?.style ||
+        body?.visualStyle ||
+        "Dinámico";
+
+      const duration =
+        Number(body?.duration) || 4;
+
+      // Sora admite actualmente 4, 8 o 12 segundos.
+      const allowedSeconds = [4, 8, 12];
+
+      const seconds =
+        allowedSeconds.includes(duration)
+          ? duration
+          : 4;
+
+      const prompt = `
+Crea un video vertical para redes sociales.
+
+Tema:
+${topic}
+
+Estilo visual:
+${style}
+
+El video debe ser:
+- dinámico
+- atractivo
+- moderno
+- con un gancho visual fuerte al principio
+- formato vertical 9:16
+- pensado para un Short/Reel/TikTok
+- sin texto ilegible en pantalla
+`;
+
+      const response = await fetch(
+        "https://api.openai.com/v1/videos",
+        {
+          method: "POST",
+
+          headers: {
+            ...openAIHeaders
+          },
+
+          body: JSON.stringify({
+            model:
+              env.VIDEO_MODEL || "sora-2",
+
+            prompt,
+
+            seconds,
+
+            size:
+              env.VIDEO_SIZE || "720x1280"
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const error =
+          await getErrorText(response);
+
+        return json(
+          {
+            ok: false,
+            error,
+            status: response.status
+          },
+          response.status
+        );
+      }
+
+      let data;
+
+      try {
+        data = await response.json();
+      } catch {
+        return json(
+          {
+            ok: false,
+            error:
+              "OpenAI creó una respuesta que no pudo interpretarse como JSON."
+          },
+          502
+        );
+      }
+
+      if (!data?.id) {
+        return json(
+          {
+            ok: false,
+            error:
+              "OpenAI no devolvió un ID de video.",
+            data
+          },
+          502
+        );
+      }
+
       return json({
         ok: true,
-        service: "ClipFlow AI",
-        message: "Worker funcionando correctamente.",
-        endpoints: {
-          health: "GET /api/health",
-          create_video: "POST /api/jobs",
-          video_status: "GET /api/jobs/:id",
-          video_content:
-            "GET /api/jobs/:id/content",
-          social_copy:
-            "POST /api/social/copy",
-          tiktok:
-            "GET /auth/tiktok/start",
-        },
+
+        id: data.id,
+
+        status:
+          data.status || "queued",
+
+        progress:
+          data.progress || 0,
+
+        model:
+          data.model || env.VIDEO_MODEL || "sora-2",
+
+        seconds:
+          data.seconds || seconds,
+
+        size:
+          data.size ||
+          env.VIDEO_SIZE ||
+          "720x1280"
       });
     }
 
     // =========================================================
-    // FALLBACK
+    // OPENAI SORA - CONSULTAR VIDEO
+    // GET /api/jobs/{id}
     // =========================================================
 
-    return json(
+    if (
+      url.pathname.startsWith("/api/jobs/") &&
+      request.method === "GET"
+    ) {
+      if (!env.OPENAI_API_KEY) {
+        return json(
+          {
+            ok: false,
+            error:
+              "Falta configurar OPENAI_API_KEY en Cloudflare."
+          },
+          500
+        );
+      }
+
+      const id =
+        url.pathname
+          .split("/")
+          .filter(Boolean)
+          .pop();
+
+      if (!id || id === "jobs") {
+        return json(
+          {
+            ok: false,
+            error:
+              "ID de video inválido."
+          },
+          400
+        );
+      }
+
+      const response = await fetch(
+        `https://api.openai.com/v1/videos/${encodeURIComponent(id)}`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization":
+              `Bearer ${env.OPENAI_API_KEY}`
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const error =
+          await getErrorText(response);
+
+        return json(
+          {
+            ok: false,
+            error,
+            status: response.status
+          },
+          response.status
+        );
+      }
+
+      let data;
+
+      try {
+        data = await response.json();
+      } catch {
+        return json(
+          {
+            ok: false,
+            error:
+              "OpenAI devolvió una respuesta no válida."
+          },
+          502
+        );
+      }
+
+      return json({
+        ok: true,
+
+        id: data.id,
+
+        status:
+          data.status,
+
+        progress:
+          data.progress || 0,
+
+        model:
+          data.model,
+
+        seconds:
+          data.seconds,
+
+        size:
+          data.size,
+
+        error:
+          data.error || null,
+
+        completed_at:
+          data.completed_at || null,
+
+        // El frontend puede usar este endpoint
+        // cuando el video esté completado.
+        content_url:
+          data.status === "completed"
+            ? `${url.origin}/api/jobs/${encodeURIComponent(id)}/content`
+            : null
+      });
+    }
+
+    // =========================================================
+    // OPENAI SORA - CONTENIDO DEL VIDEO
+    // GET /api/jobs/{id}/content
+    // =========================================================
+
+    if (
+      url.pathname.startsWith("/api/jobs/") &&
+      url.pathname.endsWith("/content") &&
+      request.method === "GET"
+    ) {
+      if (!env.OPENAI_API_KEY) {
+        return new Response(
+          "Falta configurar OPENAI_API_KEY en Cloudflare.",
+          { status: 500 }
+        );
+      }
+
+      const parts =
+        url.pathname
+          .split("/")
+          .filter(Boolean);
+
+      const id =
+        parts[2];
+
+      if (!id) {
+        return new Response(
+          "ID de video inválido.",
+          { status: 400 }
+        );
+      }
+
+      const response = await fetch(
+        `https://api.openai.com/v1/videos/${encodeURIComponent(id)}/content`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization":
+              `Bearer ${env.OPENAI_API_KEY}`
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const error =
+          await getErrorText(response);
+
+        return json(
+          {
+            ok: false,
+            error
+          },
+          response.status
+        );
+      }
+
+      const headers =
+        new Headers(response.headers);
+
+      headers.set(
+        "Content-Type",
+        "video/mp4"
+      );
+
+      headers.set(
+        "Cache-Control",
+        "no-store"
+      );
+
+      return new Response(
+        response.body,
+        {
+          status: response.status,
+          headers
+        }
+      );
+    }
+
+    // =========================================================
+    // FALLBACK - ARCHIVOS ESTÁTICOS
+    // =========================================================
+
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+
+    return new Response(
+      "ClipFlow AI Worker funcionando.",
       {
-        error: "Ruta no encontrada.",
-        path: url.pathname,
-        method: request.method,
-      },
-      404
+        status: 200,
+        headers: {
+          "Content-Type":
+            "text/plain; charset=utf-8"
+        }
+      }
     );
-  },
+  }
 };
