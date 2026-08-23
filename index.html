@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClipFlow — Videos automatizados</title>
+<style>
+:root{
+  --bg:#08090d;--panel:#11131a;--panel2:#171923;--line:#292c38;
+  --text:#f7f7fb;--muted:#9a9eae;--accent:#8b5cf6;--accent2:#ec4899;
+  --ok:#22c55e;
+}
+*{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 70% -10%,#2a174c 0,#08090d 38%);color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}
+button,input,textarea,select{font:inherit} button{cursor:pointer}
+.app{display:flex;min-height:100vh}.sidebar{width:240px;border-right:1px solid var(--line);background:#0c0d12;padding:22px 14px;display:flex;flex-direction:column}
+.logo{font-size:22px;font-weight:900;padding:4px 12px 24px}.logo span{color:#a78bfa}
+.nav button{width:100%;border:0;background:transparent;color:var(--muted);padding:12px;border-radius:10px;text-align:left;margin:2px 0}
+.nav button.active,.nav button:hover{background:#1a1725;color:#fff}.nav i{display:inline-block;width:25px;font-style:normal}
+.sidebottom{margin-top:auto;color:var(--muted);font-size:12px;padding:12px}.main{flex:1;max-width:1500px;margin:auto;padding:26px 32px}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.top h1{margin:0;font-size:28px}.badge{font-size:12px;color:#c4b5fd;background:#25183a;border:1px solid #493173;padding:6px 9px;border-radius:99px}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);gap:22px}.card{background:rgba(17,19,26,.9);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 18px 60px #0004}.card h2{font-size:16px;margin:0 0 16px}.row{display:flex;gap:12px}.field{margin-bottom:15px;flex:1}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}.field input,.field textarea,.field select{width:100%;background:#0c0e14;border:1px solid #303341;color:#fff;border-radius:10px;padding:11px;outline:none}.field textarea{min-height:120px;resize:vertical}.field input:focus,.field textarea:focus,.field select:focus{border-color:#7c5ac7}
+.btn{border:0;border-radius:10px;padding:11px 15px;font-weight:700}.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}.secondary{background:#20232d;color:#fff;border:1px solid #343745}.full{width:100%}
+.preview{display:flex;justify-content:center;align-items:center;min-height:410px;background:linear-gradient(145deg,#191321,#0b0c11);border:1px solid #2c2f3b;border-radius:14px;position:relative;overflow:hidden}
+.phone{width:190px;height:338px;border-radius:24px;background:#050507;border:7px solid #2b2c34;box-shadow:0 25px 70px #000;overflow:hidden;position:relative}
+.phone .scene{height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:18px;background:linear-gradient(160deg,#51308b,#111 55%,#030304)}
+.play{position:absolute;left:50%;top:43%;transform:translate(-50%,-50%);width:48px;height:48px;border-radius:50%;background:#fff;color:#111;display:grid;place-items:center}
+.caption{font-weight:900;font-size:18px;line-height:1.05;text-shadow:0 2px 8px #000;margin-bottom:9px}.handle{font-size:10px;color:#ddd}.progress{position:absolute;bottom:0;left:0;height:3px;width:38%;background:#fff}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.stat{background:#0d0f15;border:1px solid var(--line);border-radius:10px;padding:12px}.stat b{display:block;font-size:18px}.stat span{font-size:11px;color:var(--muted)}
+.templates{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.template{padding:12px;background:#0c0e14;border:1px solid #2c2f39;border-radius:10px;text-align:left;color:#fff}.template:hover{border-color:#7656b6}.template small{color:var(--muted)}
+.progressbox{display:none;margin-top:14px}.bar{height:8px;background:#252833;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s}
+.projects{margin-top:22px}.project{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid var(--line)}.project:first-child{border-top:0}.thumb{width:48px;height:70px;border-radius:7px;background:linear-gradient(145deg,#7137b5,#111);margin-right:12px}.pinfo{display:flex;align-items:center;flex:1}.pinfo strong{display:block}.pinfo small{color:var(--muted)}
+.toast{position:fixed;right:20px;bottom:20px;background:#fff;color:#111;padding:12px 16px;border-radius:10px;display:none;box-shadow:0 15px 40px #0007}
+@media(max-width:900px){.sidebar{display:none}.main{padding:18px}.grid{grid-template-columns:1fr}.preview{min-height:390px}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="logo">Clip<span>Flow</span></div>
+  <div class="nav">
+    <button class="active">◉ &nbsp; Crear video</button>
+    <button>▣ &nbsp; Mis proyectos</button>
+    <button>✦ &nbsp; Plantillas</button>
+    <button>◌ &nbsp; Biblioteca</button>
+    <button>⚙ &nbsp; Configuración</button>
+  </div>
+  <div class="sidebottom">Plan Creator<br><b style="color:#fff">48 / 100 videos</b> este mes</div>
+</aside>
+
+<main class="main">
+  <div class="top">
+    <div><h1>Crea shorts con IA</h1><span style="color:var(--muted);font-size:13px">Convierte una idea en un video vertical listo para publicar.</span></div>
+    <span class="badge">● IA activada</span>
+  </div>
+
+  <div class="grid">
+    <section>
+      <div class="card">
+        <h2>1. Describe tu video</h2>
+        <div class="field"><label>Tema o guion</label><textarea id="script" placeholder="Ej.: 5 hábitos que te harán más productivo. Explica cada uno de forma rápida y atractiva..."></textarea></div>
+        <div class="row">
+          <div class="field"><label>Duración</label><select id="duration"><option>30 segundos</option><option>45 segundos</option><option>60 segundos</option></select></div>
+          <div class="field"><label>Formato</label><select><option>9:16 — Short</option><option>1:1 — Cuadrado</option><option>16:9 — YouTube</option></select></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Voz</label><select><option>Español — Natural</option><option>Español — Energética</option><option>Inglés — Natural</option></select></div>
+          <div class="field"><label>Estilo visual</label><select id="style"><option>Dinámico</option><option>Minimalista</option><option>Gaming</option><option>Documental</option></select></div>
+        </div>
+        <button class="btn primary full" id="generate">✨ Generar video con IA</button>
+        <div style="margin-top:10px;font-size:11px;color:#777">Backend: <span id="apiState">comprobando…</span></div>
+        <div class="progressbox" id="progressBox"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:7px"><span id="status">Analizando guion...</span><b id="percent">0%</b></div><div class="bar"><i id="bar"></i></div></div>
+      </div>
+
+      <div class="card" style="margin-top:22px">
+        <h2>Plantillas rápidas</h2>
+        <div class="templates">
+          <button class="template" data-text="3 secretos para mejorar tu productividad desde hoy."><b>Productividad</b><br><small>Hook + 3 puntos + CTA</small></button>
+          <button class="template" data-text="5 datos sorprendentes que probablemente no conocías."><b>Datos virales</b><br><small>Lista rápida + subtítulos</small></button>
+          <button class="template" data-text="Una historia corta con un giro inesperado al final."><b>Storytelling</b><br><small>Narrativa + tensión</small></button>
+        </div>
+      </div>
+    </section>
+
+    <aside>
+      <div class="card">
+        <h2>Vista previa</h2>
+        <div class="preview">
+          <div class="phone">
+            <div class="scene" id="scene">
+              <div class="play">▶</div>
+              <div class="caption" id="caption">Tu próximo video viral empieza aquí.</div>
+              <div class="handle">@clipflow.ai</div>
+              <div class="progress"></div>
+            </div>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>9:16</b><span>Formato</span></div>
+          <div class="stat"><b id="wordCount">0</b><span>Palabras</span></div>
+          <div class="stat"><b>HD</b><span>Exportación</span></div>
+        </div>
+      </div>
+      <div class="card projects">
+        <h2>Últimos proyectos</h2>
+        <div class="project"><div class="pinfo"><div class="thumb"></div><div><strong>3 hábitos productivos</strong><small>Hace 12 min · 00:31</small></div></div><span>✓</span></div>
+        <div class="project"><div class="pinfo"><div class="thumb" style="background:linear-gradient(145deg,#b45309,#111)"></div><div><strong>5 datos sorprendentes</strong><small>Ayer · 00:28</small></div></div><span>✓</span></div>
+      </div>
+    </aside>
+  </div>
+
+<div class="card" style="margin-top:22px">
+  <h2>🚀 Publicación y distribución</h2>
+  <div class="row">
+    <div class="field"><label>Plataforma</label><select id="platform"><option>TikTok</option><option>YouTube Shorts</option><option>Instagram Reels</option></select></div>
+    <div class="field"><label>Tono</label><select id="tone"><option>Viral</option><option>Educativo</option><option>Profesional</option><option>Storytelling</option></select></div>
+  </div>
+  <div class="field"><label>Caption + hashtags</label><textarea id="socialCopy" placeholder="Se generará automáticamente después de crear el video."></textarea></div>
+  <div class="row">
+    <button class="btn secondary" id="makeCopy">✨ Generar copy con IA</button>
+    <button class="btn secondary" id="connectTikTok">🔗 Conectar TikTok</button><button class="btn secondary" id="publishSocial">🚀 Publicar</button>
+  </div>
+  <p style="font-size:11px;color:#777;margin-bottom:0">La publicación directa requiere configurar OAuth y permisos de cada plataforma.</p>
+</div>
+<div class="card" style="margin-top:22px">
+  <h2>🎵 Música</h2>
+  <select id="music" style="width:100%;background:#0c0e14;border:1px solid #303341;color:#fff;border-radius:10px;padding:11px"><option value="none">Sin música</option></select>
+</div>
+</main>
+</div>
+<div class="toast" id="toast">Video generado correctamente ✨</div>
+<script>
+const script=document.getElementById('script'), caption=document.getElementById('caption'), wordCount=document.getElementById('wordCount');
+script.addEventListener('input',()=>{ const t=script.value.trim(); wordCount.textContent=t?t.split(/\s+/).length:0; caption.textContent=t?t.slice(0,85)+(t.length>85?'…':''):'Tu próximo video viral empieza aquí.'; });
+document.querySelectorAll('.template').forEach(b=>b.onclick=()=>{script.value=b.dataset.text;script.dispatchEvent(new Event('input'));});
+const API = location.protocol === 'file:' ? 'http://localhost:3000' : '';
+async function api(path, options={}) {
+  const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...options});
+  const data=await r.json(); if(!r.ok) throw new Error(data.error||'Error del servidor'); return data;
+}
+api('/api/health').then(()=>document.getElementById('apiState').textContent='conectado').catch(()=>document.getElementById('apiState').textContent='sin conexión');
+
+document.getElementById('generate').onclick=async()=>{
+  if(!script.value.trim()){script.focus();return;}
+  const box=document.getElementById('progressBox'),bar=document.getElementById('bar'),pct=document.getElementById('percent'),status=document.getElementById('status');
+  box.style.display='block'; bar.style.width='3%'; pct.textContent='3%'; status.textContent='Preparando producción…';
+  try{
+    const duration=parseInt(document.getElementById('duration').value);
+    const style=document.getElementById('style').value;
+    const job=await api('/api/jobs',{method:'POST',body:JSON.stringify({topic:script.value,duration,style})});
+    latestJob=job;
+    let finished=false;
+    while(!finished){
+      await new Promise(r=>setTimeout(r,2500));
+      const j=await api('/api/jobs/'+job.id);
+      bar.style.width=Math.max(3,j.progress)+'%'; pct.textContent=j.progress+'%';
+      status.textContent={queued:'En cola…',scripting:'Escribiendo guion con IA…',generating:'Generando escenas con IA…',assembling:'Uniendo video, voz y subtítulos…',completed:'¡Video listo!' }[j.status]||j.status;
+      if(j.status==='completed'){
+        finished=true; caption.textContent=j.data?.hook||'Tu short está listo';
+        document.getElementById('toast').textContent='Short terminado ✨';
+        document.getElementById('toast').style.display='block';
+        setTimeout(()=>document.getElementById('toast').style.display='none',3500);
+        if(j.output){
+          const link=document.createElement('a'); link.href=API+j.output; link.download='clipflow-short.mp4';
+          link.textContent='⬇️ Descargar MP4'; link.className='btn secondary'; link.style.display='block'; link.style.marginTop='12px';
+          box.after(link);
+        }
+      }
+      if(j.status==='failed') throw new Error(j.error||'La producción falló');
+    }
+  }catch(e){
+    status.textContent='Error: '+e.message;
+    document.getElementById('toast').textContent='No se pudo producir el short';
+    document.getElementById('toast').style.display='block';
+    setTimeout(()=>document.getElementById('toast').style.display='none',3500);
+  }
+};
+
+let latestJob=null;
+document.getElementById('makeCopy').onclick=async()=>{
+  try{
+    const data=await api('/api/social/copy',{method:'POST',body:JSON.stringify({topic:script.value,platform:document.getElementById('platform').value.toLowerCase(),tone:document.getElementById('tone').value})});
+    document.getElementById('socialCopy').value=data.caption+"\n\n"+(data.hashtags||[]).join(" ");
+  }catch(e){alert(e.message)}
+};
+document.getElementById('publishSocial').onclick=async()=>{
+  if(document.getElementById('platform').value!=='TikTok'){
+    alert('El adaptador visual está preparado; configura OAuth de YouTube/Instagram en el backend para habilitar publicación.');
+    return;
+  }
+  const token=prompt('Pega temporalmente el access token de TikTok:');
+  if(!token||!latestJob?.output)return alert('Primero genera un video.');
+  const url=location.origin+latestJob.output;
+  try{
+    const r=await api('/api/social/tiktok',{method:'POST',body:JSON.stringify({
+      accessToken:token,videoUrl:url,title:document.getElementById('socialCopy').value,privacy:'SELF_ONLY'
+    })});
+    alert('Enviado a TikTok. Publish ID: '+(r.publish_id||'OK'));
+  }catch(e){alert(e.message)}
+};
+fetch(API+'/api/music').then(r=>r.json()).then(list=>{
+  const sel=document.getElementById('music'); list.forEach(x=>{const o=document.createElement('option');o.value=x.url;o.textContent=x.name;sel.appendChild(o);});
+}).catch(()=>{});
+document.getElementById('connectTikTok')?.addEventListener('click',()=>location.href='/auth/tiktok/start');
+</script>
+</body>
+</html>
